@@ -345,7 +345,7 @@ return(mets)
 # Merge Crown ID with las point cloud
 tree_las <- lidR::merge_spatial(las, crowns, attribute = 'treeID')
 # Add treeID attribute to las
-  tree_las = add_lasattribute(tree_las, name="treeID", desc="ID of a tree")
+tree_las = add_lasattribute(tree_las, name = "treeID", desc = "ID of a tree")
 # Filter out non tree points to speed up computation
 tree_las <- filter_poi(tree_las, !is.na(treeID))
 # Plot resulting point cloud coloured by treeID
@@ -368,9 +368,9 @@ ashape <- get_crown_attributes(tree@data$X,
 a3d <- ashape[[3]]
 # Extract alphashape object (for plotting)
 ashape <- ashape[[2]]
+
 # Plot Raw Point Cloud
 plot(tree, bg = 'white', size = 6)
-
 # Plot concave hull (alpha = 1)
 plot(ashape, indexAlpha = 1, transparency = 0.3, axes = TRUE)
 points3d(a3d, color = 'black')
@@ -390,13 +390,15 @@ tree_las_dec <- decimate_points(tree_las, random_per_voxel(res = 0.5, n = 1))
 ashape_mets <- get_alphashape_metrics(tree_las)
 ```
 
-```{r, include= FALSE}
+```{r,include=FALSE, warning=FALSE, message=FALSE, echo=FALSE}
 #ashape_mets <- st_read('extdata/ashape_mets.shp')
 ```
 
 Calculate Competition Index based on Crown Volume Values
 
 ![Calculation of Heygi style competition index (maxR = sphere of influence radius)](images/heygi.png)
+
+This function will be used to take the detected tree tops from lidR (an sf point obect), convert them to a [spatstat](https://spatstat.org/) compatiable point pattern (ppp) object, and finally performing the pairwise competition index using the [siplap](https://github.com/ogarciav/siplab) package to compute the index.
 
 ```{r, include=FALSE}
 heygi_cindex <- function(ttops, comp_input = 'vol_convex', maxR = 6){
@@ -444,7 +446,9 @@ heygi_cindex <- function(ttops, comp_input = 'vol_convex', maxR = 6){
 }
 ```
 
-```{r, warning=FALSE, message=FALSE}
+Here we will take the function and apply it to the tree tops attributed with concave_hull volume from their associated point cloud. We will finish by plotting the result (filtered/binned to emphasize differences in index values).
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
 # Calculate Heygi 1974 style Competition Index on tree tops attributed with crown volume values - remove one outliers one edge
 heygi_6m <- heygi_cindex(ashape_mets, comp_input = 'vol_concave', maxR = 6) %>% filter(cindex < 10)
 

@@ -211,7 +211,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Merge Crown ID with las point cloud</span></span>
 <span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">&lt;-</span> lidR<span class="sc">::</span><span class="fu">merge_spatial</span>(las, crowns, <span class="at">attribute =</span> <span class="st">'treeID'</span>)</span>
 <span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Add treeID attribute to las</span></span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  tree_las <span class="ot">=</span> <span class="fu">add_lasattribute</span>(tree_las, <span class="at">name=</span><span class="st">"treeID"</span>, <span class="at">desc=</span><span class="st">"ID of a tree"</span>)</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">=</span> <span class="fu">add_lasattribute</span>(tree_las, <span class="at">name =</span> <span class="st">"treeID"</span>, <span class="at">desc =</span> <span class="st">"ID of a tree"</span>)</span>
 <span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter out non tree points to speed up computation</span></span>
 <span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">&lt;-</span> <span class="fu">filter_poi</span>(tree_las, <span class="sc">!</span><span class="fu">is.na</span>(treeID))</span>
 <span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot resulting point cloud coloured by treeID</span></span>
@@ -236,9 +236,9 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>a3d <span class="ot">&lt;-</span> ashape[[<span class="dv">3</span>]]</span>
 <span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Extract alphashape object (for plotting)</span></span>
 <span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>ashape <span class="ot">&lt;-</span> ashape[[<span class="dv">2</span>]]</span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot Raw Point Cloud</span></span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(tree, <span class="at">bg =</span> <span class="st">'white'</span>, <span class="at">size =</span> <span class="dv">6</span>)</span>
-<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot Raw Point Cloud</span></span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(tree, <span class="at">bg =</span> <span class="st">'white'</span>, <span class="at">size =</span> <span class="dv">6</span>)</span>
 <span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot concave hull (alpha = 1)</span></span>
 <span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(ashape, <span class="at">indexAlpha =</span> <span class="dv">1</span>, <span class="at">transparency =</span> <span class="fl">0.3</span>, <span class="at">axes =</span> <span class="cn">TRUE</span>)</span>
 <span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="fu">points3d</span>(a3d, <span class="at">color =</span> <span class="st">'black'</span>)</span>
@@ -265,34 +265,13 @@ Beginning crown metric generation for chunk</code></pre>
 <p></p><figcaption class="figure-caption">Calculation of Heygi style competition index (maxR = sphere of influence radius)</figcaption><p></p>
 </figure>
 </div>
+<p>This function will be used to take the detected tree tops from lidR (an sf point obect), convert them to a <a href="https://spatstat.org/">spatstat</a> compatiable point pattern (ppp) object, and finally performing the pairwise competition index using the <a href="https://github.com/ogarciav/siplab">siplap</a> package to compute the index.</p>
+<p>Here we will take the function and apply it to the tree tops attributed with concave_hull volume from their associated point cloud. We will finish by plotting the result (filtered/binned to emphasize differences in index values).</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Calculate Heygi 1974 style Competition Index on tree tops attributed with crown volume values - remove one outliers one edge</span></span>
-<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>heygi_6m <span class="ot">&lt;-</span> <span class="fu">heygi_cindex</span>(ashape_mets, <span class="at">comp_input =</span> <span class="st">'vol_concave'</span>, <span class="at">maxR =</span> <span class="dv">6</span>) <span class="sc">%&gt;%</span> <span class="fu">filter</span>(cindex <span class="sc">&lt;</span> <span class="dv">10</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Calculated Heygi style competition for 335 trees assesing their vol_concave within a 6m radius
-1.12 sec elapsed</code></pre>
+1.06 sec elapsed</code></pre>
 </div>
-<div class="sourceCode cell-code" id="cb10"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Define the bins</span></span>
-<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a>breaks <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">10</span>, <span class="at">by =</span> <span class="fl">2.5</span>)</span>
-<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a>bin_labels <span class="ot">&lt;-</span> <span class="fu">paste</span>(<span class="fu">head</span>(breaks, <span class="sc">-</span><span class="dv">1</span>), <span class="fu">tail</span>(breaks, <span class="sc">-</span><span class="dv">1</span>), <span class="at">sep =</span> <span class="st">"-"</span>)</span>
-<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Assign each cindex value to a bin</span></span>
-<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a>heygi_6m<span class="sc">$</span>cindex_bin <span class="ot">&lt;-</span> <span class="fu">cut</span>(heygi_6m<span class="sc">$</span>cindex, <span class="at">breaks =</span> breaks, <span class="at">labels =</span> bin_labels, <span class="at">include.lowest =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Create a color mapping for the bins - ensuring one color per bin</span></span>
-<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a>c <span class="ot">&lt;-</span> viridis<span class="sc">::</span><span class="fu">viridis</span>(<span class="fu">length</span>(bin_labels))</span>
-<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Map each bin to its color</span></span>
-<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>bin_colors <span class="ot">&lt;-</span> <span class="fu">setNames</span>(c, bin_labels)</span>
-<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>cindex_bin_colors <span class="ot">&lt;-</span> bin_colors[<span class="fu">as.character</span>(heygi_6m<span class="sc">$</span>cindex_bin)]</span>
-<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot the CHM</span></span>
-<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(chm, <span class="at">col =</span> <span class="fu">colorRampPalette</span>(<span class="fu">c</span>(<span class="st">"black"</span>, <span class="st">"white"</span>))(<span class="dv">50</span>), <span class="at">legend =</span> T)</span>
-<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot the sf points with bin colors</span></span>
-<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(<span class="fu">st_geometry</span>(heygi_6m), <span class="at">add =</span> <span class="cn">TRUE</span>, <span class="at">pch =</span> <span class="dv">21</span>, <span class="at">bg =</span> cindex_bin_colors, <span class="at">col =</span> <span class="cn">NA</span>)</span>
-<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a><span class="co"># Add a legend for the bins</span></span>
-<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a><span class="fu">legend</span>(<span class="st">"bottomleft"</span>, <span class="at">legend =</span> bin_labels, <span class="at">fill =</span> bin_colors, <span class="at">title =</span> <span class="st">"Competition Index"</span>, <span class="at">inset =</span> (<span class="fu">c</span>(<span class="fl">0.13</span>,<span class="dv">0</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output-display">
 <p><img src="index_files/figure-html/unnamed-chunk-12-1.png" class="img-fluid" width="672"></p>
 </div>
