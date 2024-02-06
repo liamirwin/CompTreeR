@@ -1,0 +1,474 @@
+---
+title: "Demonstration of Competition Assessment Workflow"
+author: "Liam Irwin"
+format: html
+editor: visual
+---
+
+## Assessing Competition with Lidar Data - Irwin et al. 2024
+
+In this document we will provide a brief overview of the processing steps required to go from a raw point cloud to a competition layer.
+
+1 - Normalized LAS point cloud
+
+2 - Tree detection (lidR)
+
+3 - Tree segmentation
+
+4 - Computation of crown volume
+
+5 - Computation of competition indicies
+
+## Tree Detection and Segmentation
+
+In this section we will start with a normalized lidar point cloud collected over a coniferous managed forest stand. In this stand managers have desire to perform thinning but require a spatially explicit layer describing the competitive distribution of trees. Using this layer they can target areas with relatively high competition for thinning.
+
+First we will detect and segment tree crowns [(lidRbook/itd-its)](https://r-lidar.github.io/lidRbook/itd-its.html)
+
+We will start by loading relevant packages and an example dataset; clipped from the Irwin et al. 2024 data
+
+-   To speed up computation in this example the data has been thinned from the original density (\~1200 pts/m2) using a 25cm voxel retaining 1 point, resulting in a density of (173 points/m2).
+
+```{r, message=FALSE, warning=FALSE}
+library(lidR)
+library(dplyr)
+library(sf)
+library(terra)
+library(siplab)
+
+las <- readLAS('extdata/thin_plot_dec.laz')
+```
+
+![Example data included in tutorial: top row is unthinned DLS dataset (1250 points/m2, coloured by Z values and RGB), bottom row is same dataset thinned to one point per 0.25 m voxel (173 points/m2)](images/ex_plot.png)
+
+First we will generate a canopy height model, smooth it, then detect tree tops, and finally segment tree crowns
+
+Canopy Height Model Generation
+
+```{r}
+# Generate Canopy Height Model (CHM) with lidR
+chm <- rasterize_canopy(las, res = 0.1, p2r(subcircle = 0.075))
+
+# Gaussian smoothing function
+fgauss <- function(sigma, n = ws) {
+    m <- matrix(ncol = n, nrow = n)
+    col <- rep(1:n, n)
+    row <- rep(1:n, each = n)
+    x <- col - ceiling(n/2)
+    y <- row - ceiling(n/2)
+    m[cbind(row, col)] <- 1/(2 * pi * sigma^2) * exp     (-(x^2 + y^2)/(2 * sigma^2))
+    m/sum(m)
+  }
+
+# Apply Gaussian smoothing with terra::focal
+chm <- terra::focal(chm, w = fgauss(1, n = 5), na.rm = T)
+
+# Plot smoothed CHM
+plot(chm, col = viridis::viridis(50))
+```
+
+Tree top detection
+
+```{r}
+# Locate tree tops on smoothed CHM with 2m maxima finding window
+ttops <- locate_trees(chm, algorithm = lmf(ws = 2, shape = "circular"))
+
+# Plot smoothed CHM with detected local maxima overlaid
+plot(chm, col = viridis::viridis(50))
+plot(st_geometry(ttops), add = T, pch = 3, col = 'red', cex = 0.5)
+```
+
+Tree crown segmentation
+
+```{r, include=FALSE}
+# Base watershed segmentation (requires EBimage)
+mcwatershed <-function(chm, treetops, th_tree = 2, tree_id = "treeID")
+{
+  f = function(bbox)
+  {
+    if (!missing(bbox)) chm <- terra::crop(chm, bbox)
+
+    # Convert the CHM to a matrix
+    Canopy <- terra::as.matrix(chm, wide = TRUE)
+    mask   <- Canopy < th_tree | is.na(Canopy)
+    Canopy[mask] <- 0
+
+    cells <- terra::cellFromXY(chm, sf::st_coordinates(treetops)[, c(1, 2)])
+    # ids <- seq_along(cells)
+    ids <- dplyr::pull(treetops, tree_id)
+
+    seeds = chm
+    seeds[] = 0L
+    seeds[cells] = ids
+    treetops = terra::as.matrix(seeds, wide = TRUE)
+
+    Canopy <- Canopy/max(Canopy)
+    Canopy <- imager::as.cimg(Canopy)
+    treetops  <- imager::as.cimg(treetops)
+    Crowns <- imager::watershed(treetops, Canopy)
+    Crowns <- Crowns[,,1,1]
+    #storage.mode(Crowns) = "integer"
+
+    Crowns[mask] <- NA_integer_
+    out <- terra::setValues(chm, Crowns)
+
+    return(out)
+  }
+
+  f <- lidR::plugin_its(f, raster_based = TRUE)
+  return(f)
+}
+
+# Height limited watershed segmentation function 
+crown_mask <- function(chunk, ttops = NULL, chm_res = 0.25, crown_height_threshold = 0.7, hmin = 2){
+
+
+  # Check that 'chunk' is not missing or NULL
+  if (is.null(chunk) || missing(chunk)) {
+    stop("Error: 'chunk' argument must be specified.")
+  }
+
+  # Check if input is a SpatRaster object
+  if("SpatRaster" == class(chunk)){
+    chm <- chunk
+    chm_res <- terra::res(chm)[1]
+    print('Input is SpatRaster (Presuming CHM) proceeding with crown segmentation')
+  } else{
+    # Check if input is a las file
+    if("LAS" %in% class(chunk)){
+      las <- chunk
+      print('Input is las file proceeding with crown segmentation')
+    }
+    else{
+      # Check if input is a las catalog chunk
+      las <- lidR::readLAS(chunk)
+      if (lidR::is.empty(las)) {
+        return(NULL)
+      }
+      print('Input is catalog tile proceeding with crown segmentation')
+    }
+
+    # Generate canopy height
+    chm <- lidR::rasterize_canopy(las, res = chm_res , lidR::p2r(na.fill = lidR::knnidw()))
+  }
+
+  # Initial crown segmentation
+
+  crowns <- mcwatershed(chm, ttops, th_tree = hmin, tree_id = 'treeID')()
+  # Replace crown IDs with maximum canopy height within crown
+  crowns_max <- terra::classify(x = crowns,
+                                rcl = as.data.frame(terra::zonal(chm,
+                                                                 crowns,
+                                                                 fun = 'max')))
+  # Make CHM mask raster where height is less than threshold percent
+  chm_mask <- chm
+  chm_mask[chm_mask < (crown_height_threshold * crowns_max)] = NA
+  # Re-run segmentation on masked CHM
+  crowns_masked <- mcwatershed(chm_mask, ttops, th_tree = hmin, tree_id = 'treeID')()
+
+  return(crowns_masked)
+}
+
+# Keep and fill largest crown polygon for each tree
+convert_multi_to_single_polygons <- function(polygons, fill_holes = TRUE){
+tictoc::tic()
+if(!"MULTIPOLYGON" %in% unique(sf::st_geometry_type(polygons))){
+  print('ERROR: Input sf polygon df contained zero MUTLIPOLYGONS; conversion not neccessary')
+  stop()
+}
+# Seperate out multipolygons
+mp <- polygons %>% dplyr::filter(sf::st_geometry_type(polygons) == 'MULTIPOLYGON')
+# Seperate out polygons
+sp <- polygons %>% dplyr::filter(sf::st_geometry_type(polygons) == 'POLYGON')
+
+largest_polygon <- function(x, Z) {
+  # Turn multipolygon into vector of single polygons
+  x <- sf::st_combine(x)
+  x <- sf::st_cast(x, "POLYGON")
+  # Calculate area of each single polygon
+  areas <- sf::st_area(x)
+  # Take largest polygon
+  max_area_index <- which.max(areas)
+  # Re-add the attribute column
+  largest <- x[max_area_index] %>% sf::st_as_sf(crs = sf::st_crs(x))
+  # Re-name geometry column
+  sf::st_geometry(largest) <- 'geometry'
+  largest <- cbind(largest, Z) %>% dplyr::relocate(geometry, .after = tidyselect::last_col())
+  if(fill_holes){
+  # Fill any holes in the resulting polygon
+  largest <- nngeo::st_remove_holes(largest)
+  }
+  return(largest)
+}
+
+# Go through multipolygons and apply largest_polygon function
+# Empty list for fixed polygons
+p_polygons <- list()
+# Progress bar
+pb <- progress::progress_bar$new(total = nrow(mp))
+print('Taking largest polygon of each MULTIPOLYGON crown')
+for (i in 1:nrow(mp)) {
+  p_polygons[[i]] <- largest_polygon(sf::st_geometry(mp[i,]), Z = sf::st_drop_geometry(mp[i,]))
+  pb$tick()
+}
+# Bind list of corrected polygons
+print(glue::glue('Binding together {length(p_polygons)} cleaned polygons'))
+p_polygons <- do.call(rbind, p_polygons)
+sf::st_crs(p_polygons) <- sf::st_crs(polygons)
+if(fill_holes == TRUE & nrow(sp) > 0){
+# Fill holes in single polygon polygons
+sp <- nngeo::st_remove_holes(sp)
+}
+# Re-join all polygons together
+polygons <- rbind(sp, p_polygons)
+print(glue::glue('Finished cleaning {nrow(polygons)} polygons'))
+tictoc::toc()
+return(polygons)
+}
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, results='hide'}
+# Generate raster representing tree crowns
+crowns <- crown_mask(chunk = chm,
+                     ttops = ttops,
+                     crown_height_threshold = 0.70)
+# Convert raster to polygon
+crowns <- sf::st_as_sf(terra::as.polygons(crowns))
+# Clean up polygons by selecting largest for each tree ID
+crowns <- crowns %>% convert_multi_to_single_polygons(fill_holes = TRUE)
+names(crowns)[1] <- 'treeID'
+# Plot resulting Crowns
+plot(chm, col = viridis::viridis(50))
+plot(st_geometry(ttops), add = T, pch = 3, col = 'red', cex = 0.5)
+plot(sf::st_geometry(crowns), add = T, border = 'red',lty = 2)
+
+
+```
+
+Apply treeID values from segmented tree crowns to point cloud
+
+```{r, include=FALSE}
+get_crown_attributes <- function(X,Y,Z){
+  if (length(X) <= 3 || length(Y) <= 3 || length(Z) <= 3) {
+    print('Cannot compute a 3D hull from 3 or fewer points')
+    return(NULL)
+  }
+  # alphashadep3d
+  a3d = cbind(X, Y, Z)
+  # get treetop location
+  top_x <- a3d[which.max(a3d[,3]),1]
+  top_y <- a3d[which.max(a3d[,3]),2]
+  # normalize X and Y
+  a3d[,1] = a3d[,1] - mean(a3d[,1]) #center points around 0,0,0
+  a3d[,2] = a3d[,2] - mean(a3d[,2]) #center points around 0,0,0
+  alpha <- c(Inf, 1)
+  ashape <- alphashape3d::ashape3d(x = a3d, alpha = alpha, pert = TRUE)
+
+  # calculate crown metrics
+
+  df <- data.frame(
+    # Crown height
+    Zmax = max(Z),
+    Zq999 = as.numeric(quantile(Z, 0.999)),
+    Zq99 = as.numeric(quantile(Z, 0.990)),
+    Z_mean = mean(Z),
+    # Crown size
+    n_points = length(Z),
+    #volume = raster::cellStats(chm_vol, sum),
+    #n_green_points = length(las_green@data$Z),
+    vol_concave = alphashape3d::volume_ashape3d(ashape, indexAlpha = 1),
+    vol_convex = alphashape3d::volume_ashape3d(ashape, indexAlpha = 2),
+    # Crown complexity
+    CV_Z = sd(Z) / mean(Z),
+    CRR = (mean(Z) - min(Z)) / (max(Z) - min(Z)),
+    # Get tree top position
+    X = top_x,
+    Y = top_y)
+
+
+  return(df)
+}
+
+get_alphashape_metrics <- function(chunk, RGB = FALSE){
+
+if ("LAS" %in% class(chunk)) {
+    tree_las <- chunk
+    print('Individual LAS object input into function')
+} else{
+tree_las <- lidR::readLAS(chunk)
+}
+
+if (lidR::is.empty(tree_las)) return(NULL)
+
+print(glue::glue('Beginning crown metric generation for chunk'))
+
+tree_las <- lidR::filter_duplicates(tree_las)
+
+
+if(RGB){
+  obs <- tree_las@data %>%
+    dplyr::filter(!is.na(treeID)) %>%
+    dplyr::select(X,Y,Z,R,G,B,treeID) %>%
+    dplyr::group_by(treeID) %>%
+    dplyr::summarise(n = dplyr::n()) %>% dplyr::ungroup() %>% dplyr::filter(n <= 4)
+}
+else{
+  obs <- tree_las@data %>%
+    dplyr::filter(!is.na(treeID)) %>%
+    dplyr::select(X,Y,Z,treeID) %>%
+    dplyr::group_by(treeID) %>%
+    dplyr::summarise(n = dplyr::n()) %>% dplyr::ungroup() %>% dplyr::filter(n <= 4)
+}
+
+if(nrow(obs) > 0){
+print(glue::glue('{nrow(obs)} treeIDs had 4 or fewer points and were discarded'))
+}
+
+else{
+  mets <- tree_las@data %>%
+    dplyr::filter(!is.na(treeID)) %>%
+    dplyr::filter(!treeID %in% obs$treeID) %>%
+    dplyr::select(X,Y,Z,treeID) %>%
+    dplyr::group_by(treeID) %>%
+    dplyr::summarise(ashape_metrics = get_crown_attributes(X, Y, Z))
+}
+mets <- cbind(mets$treeID, mets$ashape_metrics)
+
+colnames(mets)[1] <- "treeID"
+
+return(mets)
+
+}
+```
+
+```{r}
+# Merge Crown ID with las point cloud
+tree_las <- lidR::merge_spatial(las, crowns, attribute = 'treeID')
+# Add treeID attribute to las
+  tree_las = add_lasattribute(tree_las, name="treeID", desc="ID of a tree")
+# Filter out non tree points to speed up computation
+tree_las <- filter_poi(tree_las, !is.na(treeID))
+# Plot resulting point cloud coloured by treeID
+plot(tree_las, color = 'treeID')
+```
+
+![DLS point cloud plot coloured by treeID's generated in detection/segmentation process](images/ex_plot_treeid.png)
+
+Generate 3D alphashape and calculate convex/concave hull (crown) volume for each tree
+
+```{r, eval=FALSE}
+# Filter out points for one tree (example)
+tree <- filter_poi(tree_las, treeID == 147)
+# Calculate alphashape for tree
+ashape <- get_crown_attributes(tree@data$X,
+                     tree@data$Y,
+                     tree@data$Z,
+                     export_ashape = TRUE)
+# Extract individual X,Y,Z points (for plotting)
+a3d <- ashape[[3]]
+# Extract alphashape object (for plotting)
+ashape <- ashape[[2]]
+# Plot Raw Point Cloud
+plot(tree, bg = 'white', size = 6)
+
+# Plot concave hull (alpha = 1)
+plot(ashape, indexAlpha = 1, transparency = 0.3, axes = TRUE)
+points3d(a3d, color = 'black')
+# Plot convex hull (alpha = Inf)
+plot(ashape, indexAlpha = 2, transparency = 0.4, axes = TRUE)
+points3d(a3d, color = 'black')
+
+```
+
+![](images/alphashape_visualization.png)
+
+```{r, eval = TRUE,message=FALSE, warning=FALSE}
+# Decimate density heavily to speed up alphashape computation in example
+tree_las_dec <- decimate_points(tree_las, random_per_voxel(res = 0.5, n = 1))
+
+
+ashape_mets <- get_alphashape_metrics(tree_las)
+```
+
+```{r, include= FALSE}
+#ashape_mets <- st_read('extdata/ashape_mets.shp')
+```
+
+Calculate Competition Index based on Crown Volume Values
+
+![Calculation of Heygi style competition index (maxR = sphere of influence radius)](images/heygi.png)
+
+```{r, include=FALSE}
+heygi_cindex <- function(ttops, comp_input = 'vol_convex', maxR = 6){
+
+  tictoc::tic()
+
+  # Convert ttops to ppp object
+  trees_ppp <- ttops %>%
+    dplyr::mutate(X = X, Y = Y) %>%
+    as.data.frame() %>%
+    dplyr::select(c(X, Y, comp_input))
+
+  names(trees_ppp) <- c('X','Y','comp_value')
+
+  trees_ppp <- trees_ppp %>%
+    spatstat.geom::ppp(
+      x = .$X,
+      y = .$Y,
+      window = spatstat.geom::owin(range(.$X),
+                                   range(.$Y)),
+      marks = .$comp_value)
+
+  # Calculate heygi competition index for each tree (Z instead of dbh)
+  heygi <- trees_ppp %>%
+    siplab::pairwise(., maxR=maxR, kernel=siplab::powers_ker,
+                     kerpar=list(pi=1, pj=1, pr=1, smark=1))
+
+
+  # Join new cindex with original ttops
+
+  trees_cindex <- heygi %>%
+    as.data.frame() %>% dplyr::select(x, y, cindex)
+
+  ttops <- ttops %>% sf::st_as_sf(coords = c('X', 'Y'))
+
+  trees_cindex <- dplyr::bind_cols(ttops, trees_cindex)
+
+
+  print(glue::glue('Calculated Heygi style competition for {nrow(trees_cindex)} trees assesing their {comp_input} within a {maxR}m radius'))
+
+  tictoc::toc()
+
+  return(trees_cindex)
+
+}
+```
+
+```{r, warning=FALSE, message=FALSE}
+# Calculate Heygi 1974 style Competition Index on tree tops attributed with crown volume values - remove one outliers one edge
+heygi_6m <- heygi_cindex(ashape_mets, comp_input = 'vol_concave', maxR = 6) %>% filter(cindex < 10)
+
+# Define the bins
+breaks <- seq(0, 10, by = 2.5)
+bin_labels <- paste(head(breaks, -1), tail(breaks, -1), sep = "-")
+
+# Assign each cindex value to a bin
+heygi_6m$cindex_bin <- cut(heygi_6m$cindex, breaks = breaks, labels = bin_labels, include.lowest = TRUE)
+
+# Create a color mapping for the bins - ensuring one color per bin
+c <- viridis::viridis(length(bin_labels))
+
+# Map each bin to its color
+bin_colors <- setNames(c, bin_labels)
+cindex_bin_colors <- bin_colors[as.character(heygi_6m$cindex_bin)]
+# Plot the CHM
+plot(chm, col = colorRampPalette(c("black", "white"))(50), legend = T)
+
+# Plot the sf points with bin colors
+plot(st_geometry(heygi_6m), add = TRUE, pch = 21, bg = cindex_bin_colors, col = NA)
+
+# Add a legend for the bins
+legend("bottomleft", legend = bin_labels, fill = bin_colors, title = "Competition Index", inset = (c(0.13,0)))
+
+
+```
