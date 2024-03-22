@@ -143,9 +143,9 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <h2 class="anchored" data-anchor-id="tree-detection-and-segmentation">Tree Detection and Segmentation</h2>
 <p>In this section we will start with a normalized lidar point cloud collected over a coniferous managed forest stand. In this stand managers have desire to perform thinning but require a spatially explicit layer describing the competitive distribution of trees. Using this layer they can target areas with relatively high competition for thinning.</p>
 <p>First we will detect and segment tree crowns <a href="https://r-lidar.github.io/lidRbook/itd-its.html">(lidRbook/itd-its)</a></p>
-<p>We will start by loading relevant packages and an example dataset; clipped from the Irwin et al.&nbsp;2024 data</p>
+<p>We will start by loading relevant packages and an example L1 lidar dataset; clipped from the Irwin et al.&nbsp;2024 data</p>
 <ul>
-<li>To speed up computation in this example the data has been thinned from the original density (~1200 pts/m2) using a 25cm voxel retaining 1 point, resulting in a density of (173 points/m2).</li>
+<li>To speed up computation in this example the data has been thinned from the original density (~1200 pts/m2) using a 25cm voxel retaining 1 random point, resulting in a density of (173 points/m2).</li>
 </ul>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb1"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(lidR)</span>
@@ -166,7 +166,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <p>Canopy Height Model Generation</p>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Generate Canopy Height Model (CHM) with lidR</span></span>
-<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>chm <span class="ot">&lt;-</span> <span class="fu">rasterize_canopy</span>(las, <span class="at">res =</span> <span class="fl">0.1</span>, <span class="fu">p2r</span>(<span class="at">subcircle =</span> <span class="fl">0.075</span>))</span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a>chm <span class="ot">&lt;-</span> lidR<span class="sc">::</span><span class="fu">rasterize_canopy</span>(las, <span class="at">res =</span> <span class="fl">0.1</span>, <span class="fu">p2r</span>(<span class="at">subcircle =</span> <span class="fl">0.075</span>))</span>
 <span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="co"># Gaussian smoothing function</span></span>
 <span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a>fgauss <span class="ot">&lt;-</span> <span class="cf">function</span>(sigma, <span class="at">n =</span> ws) {</span>
@@ -201,21 +201,196 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 </div>
 </div>
 <p>Tree crown segmentation</p>
+<section id="functions" class="level3">
+<h3 class="anchored" data-anchor-id="functions">Functions</h3>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-1-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-1" role="tab" aria-controls="tabset-1-1" aria-selected="true" href="">Maker controlled watershed segmentation (requires EBimage)</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-2" role="tab" aria-controls="tabset-1-2" aria-selected="false" href="">Tree Segmentation</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-1-3-tab" data-bs-toggle="tab" data-bs-target="#tabset-1-3" role="tab" aria-controls="tabset-1-3" aria-selected="false" href="">Clean Segmentations</a></li></ul>
+<div class="tab-content">
+<div id="tabset-1-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-1-1-tab">
+<div class="cell">
+<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Base watershed segmentation (requires EBimage)</span></span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>mcwatershed <span class="ot">&lt;-</span><span class="cf">function</span>(chm, treetops, <span class="at">th_tree =</span> <span class="dv">2</span>, <span class="at">tree_id =</span> <span class="st">"treeID"</span>)</span>
+<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a>{</span>
+<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>  f <span class="ot">=</span> <span class="cf">function</span>(bbox)</span>
+<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a>  {</span>
+<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span> (<span class="sc">!</span><span class="fu">missing</span>(bbox)) chm <span class="ot">&lt;-</span> terra<span class="sc">::</span><span class="fu">crop</span>(chm, bbox)</span>
+<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Convert the CHM to a matrix</span></span>
+<span id="cb4-9"><a href="#cb4-9" aria-hidden="true" tabindex="-1"></a>    Canopy <span class="ot">&lt;-</span> terra<span class="sc">::</span><span class="fu">as.matrix</span>(chm, <span class="at">wide =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb4-10"><a href="#cb4-10" aria-hidden="true" tabindex="-1"></a>    mask   <span class="ot">&lt;-</span> Canopy <span class="sc">&lt;</span> th_tree <span class="sc">|</span> <span class="fu">is.na</span>(Canopy)</span>
+<span id="cb4-11"><a href="#cb4-11" aria-hidden="true" tabindex="-1"></a>    Canopy[mask] <span class="ot">&lt;-</span> <span class="dv">0</span></span>
+<span id="cb4-12"><a href="#cb4-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-13"><a href="#cb4-13" aria-hidden="true" tabindex="-1"></a>    cells <span class="ot">&lt;-</span> terra<span class="sc">::</span><span class="fu">cellFromXY</span>(chm, sf<span class="sc">::</span><span class="fu">st_coordinates</span>(treetops)[, <span class="fu">c</span>(<span class="dv">1</span>, <span class="dv">2</span>)])</span>
+<span id="cb4-14"><a href="#cb4-14" aria-hidden="true" tabindex="-1"></a>    ids <span class="ot">&lt;-</span> dplyr<span class="sc">::</span><span class="fu">pull</span>(treetops, tree_id)</span>
+<span id="cb4-15"><a href="#cb4-15" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-16"><a href="#cb4-16" aria-hidden="true" tabindex="-1"></a>    seeds <span class="ot">=</span> chm</span>
+<span id="cb4-17"><a href="#cb4-17" aria-hidden="true" tabindex="-1"></a>    seeds[] <span class="ot">=</span> 0L</span>
+<span id="cb4-18"><a href="#cb4-18" aria-hidden="true" tabindex="-1"></a>    seeds[cells] <span class="ot">=</span> ids</span>
+<span id="cb4-19"><a href="#cb4-19" aria-hidden="true" tabindex="-1"></a>    treetops <span class="ot">=</span> terra<span class="sc">::</span><span class="fu">as.matrix</span>(seeds, <span class="at">wide =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb4-20"><a href="#cb4-20" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-21"><a href="#cb4-21" aria-hidden="true" tabindex="-1"></a>    Canopy <span class="ot">&lt;-</span> Canopy<span class="sc">/</span><span class="fu">max</span>(Canopy)</span>
+<span id="cb4-22"><a href="#cb4-22" aria-hidden="true" tabindex="-1"></a>    Canopy <span class="ot">&lt;-</span> imager<span class="sc">::</span><span class="fu">as.cimg</span>(Canopy)</span>
+<span id="cb4-23"><a href="#cb4-23" aria-hidden="true" tabindex="-1"></a>    treetops  <span class="ot">&lt;-</span> imager<span class="sc">::</span><span class="fu">as.cimg</span>(treetops)</span>
+<span id="cb4-24"><a href="#cb4-24" aria-hidden="true" tabindex="-1"></a>    Crowns <span class="ot">&lt;-</span> imager<span class="sc">::</span><span class="fu">watershed</span>(treetops, Canopy)</span>
+<span id="cb4-25"><a href="#cb4-25" aria-hidden="true" tabindex="-1"></a>    Crowns <span class="ot">&lt;-</span> Crowns[,,<span class="dv">1</span>,<span class="dv">1</span>]</span>
+<span id="cb4-26"><a href="#cb4-26" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-27"><a href="#cb4-27" aria-hidden="true" tabindex="-1"></a>    Crowns[mask] <span class="ot">&lt;-</span> <span class="cn">NA_integer_</span></span>
+<span id="cb4-28"><a href="#cb4-28" aria-hidden="true" tabindex="-1"></a>    out <span class="ot">&lt;-</span> terra<span class="sc">::</span><span class="fu">setValues</span>(chm, Crowns)</span>
+<span id="cb4-29"><a href="#cb4-29" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-30"><a href="#cb4-30" aria-hidden="true" tabindex="-1"></a>    <span class="fu">return</span>(out)</span>
+<span id="cb4-31"><a href="#cb4-31" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb4-32"><a href="#cb4-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb4-33"><a href="#cb4-33" aria-hidden="true" tabindex="-1"></a>  f <span class="ot">&lt;-</span> lidR<span class="sc">::</span><span class="fu">plugin_its</span>(f, <span class="at">raster_based =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb4-34"><a href="#cb4-34" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(f)</span>
+<span id="cb4-35"><a href="#cb4-35" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-1-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-1-2-tab">
+<p>Modified Height Limited approach This approach attempts to limit watershed crown segmentations using a canopy height pixel threshold parameter that is multiplied by the tree height; in this sense a 10 m tall tree could not contain pixels less than 7 m in height. This approach is useful in dense closed canopy stands to reduce oversegmentation.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Height limited watershed segmentation function </span></span>
+<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>crown_mask <span class="ot">&lt;-</span> <span class="cf">function</span>(chunk, <span class="at">ttops =</span> <span class="cn">NULL</span>, <span class="at">chm_res =</span> <span class="fl">0.25</span>, <span class="at">crown_height_threshold =</span> <span class="fl">0.7</span>, <span class="at">hmin =</span> <span class="dv">2</span>){</span>
+<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Check that 'chunk' is not missing or NULL</span></span>
+<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="fu">is.null</span>(chunk) <span class="sc">||</span> <span class="fu">missing</span>(chunk)) {</span>
+<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>    <span class="fu">stop</span>(<span class="st">"Error: 'chunk' argument must be specified."</span>)</span>
+<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Check if input is a SpatRaster object</span></span>
+<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span>(<span class="st">"SpatRaster"</span> <span class="sc">==</span> <span class="fu">class</span>(chunk)){</span>
+<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>    chm <span class="ot">&lt;-</span> chunk</span>
+<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a>    chm_res <span class="ot">&lt;-</span> terra<span class="sc">::</span><span class="fu">res</span>(chm)[<span class="dv">1</span>]</span>
+<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a>    <span class="fu">print</span>(<span class="st">'Input is SpatRaster (Presuming CHM) proceeding with crown segmentation'</span>)</span>
+<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a>  } <span class="cf">else</span>{</span>
+<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Check if input is a las file</span></span>
+<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">if</span>(<span class="st">"LAS"</span> <span class="sc">%in%</span> <span class="fu">class</span>(chunk)){</span>
+<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a>      las <span class="ot">&lt;-</span> chunk</span>
+<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a>      <span class="fu">print</span>(<span class="st">'Input is las file proceeding with crown segmentation'</span>)</span>
+<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a>    <span class="cf">else</span>{</span>
+<span id="cb5-21"><a href="#cb5-21" aria-hidden="true" tabindex="-1"></a>      <span class="co"># Check if input is a las catalog chunk</span></span>
+<span id="cb5-22"><a href="#cb5-22" aria-hidden="true" tabindex="-1"></a>      las <span class="ot">&lt;-</span> lidR<span class="sc">::</span><span class="fu">readLAS</span>(chunk)</span>
+<span id="cb5-23"><a href="#cb5-23" aria-hidden="true" tabindex="-1"></a>      <span class="cf">if</span> (lidR<span class="sc">::</span><span class="fu">is.empty</span>(las)) {</span>
+<span id="cb5-24"><a href="#cb5-24" aria-hidden="true" tabindex="-1"></a>        <span class="fu">return</span>(<span class="cn">NULL</span>)</span>
+<span id="cb5-25"><a href="#cb5-25" aria-hidden="true" tabindex="-1"></a>      }</span>
+<span id="cb5-26"><a href="#cb5-26" aria-hidden="true" tabindex="-1"></a>      <span class="fu">print</span>(<span class="st">'Input is catalog tile proceeding with crown segmentation'</span>)</span>
+<span id="cb5-27"><a href="#cb5-27" aria-hidden="true" tabindex="-1"></a>    }</span>
+<span id="cb5-28"><a href="#cb5-28" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-29"><a href="#cb5-29" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Generate canopy height</span></span>
+<span id="cb5-30"><a href="#cb5-30" aria-hidden="true" tabindex="-1"></a>    chm <span class="ot">&lt;-</span> lidR<span class="sc">::</span><span class="fu">rasterize_canopy</span>(las, <span class="at">res =</span> chm_res , lidR<span class="sc">::</span><span class="fu">p2r</span>(<span class="at">na.fill =</span> lidR<span class="sc">::</span><span class="fu">knnidw</span>()))</span>
+<span id="cb5-31"><a href="#cb5-31" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb5-32"><a href="#cb5-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-33"><a href="#cb5-33" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Initial crown segmentation</span></span>
+<span id="cb5-34"><a href="#cb5-34" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-35"><a href="#cb5-35" aria-hidden="true" tabindex="-1"></a>  crowns <span class="ot">&lt;-</span> <span class="fu">mcwatershed</span>(chm, ttops, <span class="at">th_tree =</span> hmin, <span class="at">tree_id =</span> <span class="st">'treeID'</span>)()</span>
+<span id="cb5-36"><a href="#cb5-36" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Replace crown IDs with maximum canopy height within crown</span></span>
+<span id="cb5-37"><a href="#cb5-37" aria-hidden="true" tabindex="-1"></a>  crowns_max <span class="ot">&lt;-</span> terra<span class="sc">::</span><span class="fu">classify</span>(<span class="at">x =</span> crowns,</span>
+<span id="cb5-38"><a href="#cb5-38" aria-hidden="true" tabindex="-1"></a>                                <span class="at">rcl =</span> <span class="fu">as.data.frame</span>(terra<span class="sc">::</span><span class="fu">zonal</span>(chm,</span>
+<span id="cb5-39"><a href="#cb5-39" aria-hidden="true" tabindex="-1"></a>                                                                 crowns,</span>
+<span id="cb5-40"><a href="#cb5-40" aria-hidden="true" tabindex="-1"></a>                                                                 <span class="at">fun =</span> <span class="st">'max'</span>)))</span>
+<span id="cb5-41"><a href="#cb5-41" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Make CHM mask raster where height is less than threshold percent</span></span>
+<span id="cb5-42"><a href="#cb5-42" aria-hidden="true" tabindex="-1"></a>  chm_mask <span class="ot">&lt;-</span> chm</span>
+<span id="cb5-43"><a href="#cb5-43" aria-hidden="true" tabindex="-1"></a>  chm_mask[chm_mask <span class="sc">&lt;</span> (crown_height_threshold <span class="sc">*</span> crowns_max)] <span class="ot">=</span> <span class="cn">NA</span></span>
+<span id="cb5-44"><a href="#cb5-44" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Re-run segmentation on masked CHM</span></span>
+<span id="cb5-45"><a href="#cb5-45" aria-hidden="true" tabindex="-1"></a>  crowns_masked <span class="ot">&lt;-</span> <span class="fu">mcwatershed</span>(chm_mask, ttops, <span class="at">th_tree =</span> hmin, <span class="at">tree_id =</span> <span class="st">'treeID'</span>)()</span>
+<span id="cb5-46"><a href="#cb5-46" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb5-47"><a href="#cb5-47" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(crowns_masked)</span>
+<span id="cb5-48"><a href="#cb5-48" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+<div id="tabset-1-3" class="tab-pane" role="tabpanel" aria-labelledby="tabset-1-3-tab">
+<p>Fill Segmentations and keep largest crown polygon This function is used to clean up the holes in segmentations resulting from the height limited approach, and to take the resulting largest polygon that is assumed to be the tree crown.</p>
+<div class="cell">
+<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Keep and fill largest crown polygon for each tree</span></span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>convert_multi_to_single_polygons <span class="ot">&lt;-</span> <span class="cf">function</span>(polygons, <span class="at">fill_holes =</span> <span class="cn">TRUE</span>){</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>tictoc<span class="sc">::</span><span class="fu">tic</span>()</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span>(<span class="sc">!</span><span class="st">"MULTIPOLYGON"</span> <span class="sc">%in%</span> <span class="fu">unique</span>(sf<span class="sc">::</span><span class="fu">st_geometry_type</span>(polygons))){</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>  <span class="fu">print</span>(<span class="st">'ERROR: Input sf polygon df contained zero MUTLIPOLYGONS; conversion not neccessary'</span>)</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">stop</span>()</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Seperate out multipolygons</span></span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>mp <span class="ot">&lt;-</span> polygons <span class="sc">%&gt;%</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(sf<span class="sc">::</span><span class="fu">st_geometry_type</span>(polygons) <span class="sc">==</span> <span class="st">'MULTIPOLYGON'</span>)</span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Seperate out polygons</span></span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>sp <span class="ot">&lt;-</span> polygons <span class="sc">%&gt;%</span> dplyr<span class="sc">::</span><span class="fu">filter</span>(sf<span class="sc">::</span><span class="fu">st_geometry_type</span>(polygons) <span class="sc">==</span> <span class="st">'POLYGON'</span>)</span>
+<span id="cb6-12"><a href="#cb6-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-13"><a href="#cb6-13" aria-hidden="true" tabindex="-1"></a>largest_polygon <span class="ot">&lt;-</span> <span class="cf">function</span>(x, Z) {</span>
+<span id="cb6-14"><a href="#cb6-14" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Turn multipolygon into vector of single polygons</span></span>
+<span id="cb6-15"><a href="#cb6-15" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> sf<span class="sc">::</span><span class="fu">st_combine</span>(x)</span>
+<span id="cb6-16"><a href="#cb6-16" aria-hidden="true" tabindex="-1"></a>  x <span class="ot">&lt;-</span> sf<span class="sc">::</span><span class="fu">st_cast</span>(x, <span class="st">"POLYGON"</span>)</span>
+<span id="cb6-17"><a href="#cb6-17" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Calculate area of each single polygon</span></span>
+<span id="cb6-18"><a href="#cb6-18" aria-hidden="true" tabindex="-1"></a>  areas <span class="ot">&lt;-</span> sf<span class="sc">::</span><span class="fu">st_area</span>(x)</span>
+<span id="cb6-19"><a href="#cb6-19" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Take largest polygon</span></span>
+<span id="cb6-20"><a href="#cb6-20" aria-hidden="true" tabindex="-1"></a>  max_area_index <span class="ot">&lt;-</span> <span class="fu">which.max</span>(areas)</span>
+<span id="cb6-21"><a href="#cb6-21" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Re-add the attribute column</span></span>
+<span id="cb6-22"><a href="#cb6-22" aria-hidden="true" tabindex="-1"></a>  largest <span class="ot">&lt;-</span> x[max_area_index] <span class="sc">%&gt;%</span> sf<span class="sc">::</span><span class="fu">st_as_sf</span>(<span class="at">crs =</span> sf<span class="sc">::</span><span class="fu">st_crs</span>(x))</span>
+<span id="cb6-23"><a href="#cb6-23" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Re-name geometry column</span></span>
+<span id="cb6-24"><a href="#cb6-24" aria-hidden="true" tabindex="-1"></a>  sf<span class="sc">::</span><span class="fu">st_geometry</span>(largest) <span class="ot">&lt;-</span> <span class="st">'geometry'</span></span>
+<span id="cb6-25"><a href="#cb6-25" aria-hidden="true" tabindex="-1"></a>  largest <span class="ot">&lt;-</span> <span class="fu">cbind</span>(largest, Z) <span class="sc">%&gt;%</span> dplyr<span class="sc">::</span><span class="fu">relocate</span>(geometry, <span class="at">.after =</span> tidyselect<span class="sc">::</span><span class="fu">last_col</span>())</span>
+<span id="cb6-26"><a href="#cb6-26" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span>(fill_holes){</span>
+<span id="cb6-27"><a href="#cb6-27" aria-hidden="true" tabindex="-1"></a>  <span class="co"># Fill any holes in the resulting polygon</span></span>
+<span id="cb6-28"><a href="#cb6-28" aria-hidden="true" tabindex="-1"></a>  largest <span class="ot">&lt;-</span> nngeo<span class="sc">::</span><span class="fu">st_remove_holes</span>(largest)</span>
+<span id="cb6-29"><a href="#cb6-29" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb6-30"><a href="#cb6-30" aria-hidden="true" tabindex="-1"></a>  <span class="fu">return</span>(largest)</span>
+<span id="cb6-31"><a href="#cb6-31" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb6-32"><a href="#cb6-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb6-33"><a href="#cb6-33" aria-hidden="true" tabindex="-1"></a><span class="co"># Go through multipolygons and apply largest_polygon function</span></span>
+<span id="cb6-34"><a href="#cb6-34" aria-hidden="true" tabindex="-1"></a><span class="co"># Empty list for fixed polygons</span></span>
+<span id="cb6-35"><a href="#cb6-35" aria-hidden="true" tabindex="-1"></a>p_polygons <span class="ot">&lt;-</span> <span class="fu">list</span>()</span>
+<span id="cb6-36"><a href="#cb6-36" aria-hidden="true" tabindex="-1"></a><span class="co"># Progress bar</span></span>
+<span id="cb6-37"><a href="#cb6-37" aria-hidden="true" tabindex="-1"></a>pb <span class="ot">&lt;-</span> progress<span class="sc">::</span>progress_bar<span class="sc">$</span><span class="fu">new</span>(<span class="at">total =</span> <span class="fu">nrow</span>(mp))</span>
+<span id="cb6-38"><a href="#cb6-38" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(<span class="st">'Taking largest polygon of each MULTIPOLYGON crown'</span>)</span>
+<span id="cb6-39"><a href="#cb6-39" aria-hidden="true" tabindex="-1"></a><span class="cf">for</span> (i <span class="cf">in</span> <span class="dv">1</span><span class="sc">:</span><span class="fu">nrow</span>(mp)) {</span>
+<span id="cb6-40"><a href="#cb6-40" aria-hidden="true" tabindex="-1"></a>  p_polygons[[i]] <span class="ot">&lt;-</span> <span class="fu">largest_polygon</span>(sf<span class="sc">::</span><span class="fu">st_geometry</span>(mp[i,]), <span class="at">Z =</span> sf<span class="sc">::</span><span class="fu">st_drop_geometry</span>(mp[i,]))</span>
+<span id="cb6-41"><a href="#cb6-41" aria-hidden="true" tabindex="-1"></a>  pb<span class="sc">$</span><span class="fu">tick</span>()</span>
+<span id="cb6-42"><a href="#cb6-42" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb6-43"><a href="#cb6-43" aria-hidden="true" tabindex="-1"></a><span class="co"># Bind list of corrected polygons</span></span>
+<span id="cb6-44"><a href="#cb6-44" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(glue<span class="sc">::</span><span class="fu">glue</span>(<span class="st">'Binding together {length(p_polygons)} cleaned polygons'</span>))</span>
+<span id="cb6-45"><a href="#cb6-45" aria-hidden="true" tabindex="-1"></a>p_polygons <span class="ot">&lt;-</span> <span class="fu">do.call</span>(rbind, p_polygons)</span>
+<span id="cb6-46"><a href="#cb6-46" aria-hidden="true" tabindex="-1"></a>sf<span class="sc">::</span><span class="fu">st_crs</span>(p_polygons) <span class="ot">&lt;-</span> sf<span class="sc">::</span><span class="fu">st_crs</span>(polygons)</span>
+<span id="cb6-47"><a href="#cb6-47" aria-hidden="true" tabindex="-1"></a><span class="cf">if</span>(fill_holes <span class="sc">==</span> <span class="cn">TRUE</span> <span class="sc">&amp;</span> <span class="fu">nrow</span>(sp) <span class="sc">&gt;</span> <span class="dv">0</span>){</span>
+<span id="cb6-48"><a href="#cb6-48" aria-hidden="true" tabindex="-1"></a><span class="co"># Fill holes in single polygon polygons</span></span>
+<span id="cb6-49"><a href="#cb6-49" aria-hidden="true" tabindex="-1"></a>sp <span class="ot">&lt;-</span> nngeo<span class="sc">::</span><span class="fu">st_remove_holes</span>(sp)</span>
+<span id="cb6-50"><a href="#cb6-50" aria-hidden="true" tabindex="-1"></a>}</span>
+<span id="cb6-51"><a href="#cb6-51" aria-hidden="true" tabindex="-1"></a><span class="co"># Re-join all polygons together</span></span>
+<span id="cb6-52"><a href="#cb6-52" aria-hidden="true" tabindex="-1"></a>polygons <span class="ot">&lt;-</span> <span class="fu">rbind</span>(sp, p_polygons)</span>
+<span id="cb6-53"><a href="#cb6-53" aria-hidden="true" tabindex="-1"></a><span class="fu">print</span>(glue<span class="sc">::</span><span class="fu">glue</span>(<span class="st">'Finished cleaning {nrow(polygons)} polygons'</span>))</span>
+<span id="cb6-54"><a href="#cb6-54" aria-hidden="true" tabindex="-1"></a>tictoc<span class="sc">::</span><span class="fu">toc</span>()</span>
+<span id="cb6-55"><a href="#cb6-55" aria-hidden="true" tabindex="-1"></a><span class="fu">return</span>(polygons)</span>
+<span id="cb6-56"><a href="#cb6-56" aria-hidden="true" tabindex="-1"></a>}</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</div>
+</div>
+</div>
 <div class="cell">
 <div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-5-1.png" class="img-fluid" width="672"></p>
+<p><img src="index_files/figure-html/unnamed-chunk-7-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
 <p>Apply treeID values from segmented tree crowns to point cloud</p>
+</section>
+<section id="functions-1" class="level3">
+<h3 class="anchored" data-anchor-id="functions-1">Functions</h3>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-2-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-1" role="tab" aria-controls="tabset-2-1" aria-selected="true" href="">Computing Crown Volume</a></li><li class="nav-item" role="presentation"><a class="nav-link" id="tabset-2-2-tab" data-bs-toggle="tab" data-bs-target="#tabset-2-2" role="tab" aria-controls="tabset-2-2" aria-selected="false" href="">Apply Across Dataset</a></li></ul>
+<div class="tab-content">
+<div id="tabset-2-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-2-1-tab">
+<p>Compute alphashape of a clipped lidar point cloud</p>
+<p>This function takes an input individual tree lidar point cloud and computes and alpha shape using the <a href="https://cran.r-project.org/web/packages/alphashape3d/index.html">alphashape3d</a> package. To do so first any segmentation with less than 3 points are discarded (in practice there are few or none). Second the X, Y, and Z coordinates are normalized to be locally referenced. Next several metrics including the volume of the hull are calculated.</p>
+</div>
+<div id="tabset-2-2" class="tab-pane" role="tabpanel" aria-labelledby="tabset-2-2-tab">
+<p>The following is a lidR compatible function to compute these metrics across large areas. To apply this across large lidar tiles where treeIDs have been attributed to each relevant point we create this wrapper function that applies the above function across each tree ID.</p>
+</div>
+</div>
+</div>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb4"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Merge Crown ID with las point cloud</span></span>
-<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">&lt;-</span> lidR<span class="sc">::</span><span class="fu">merge_spatial</span>(las, crowns, <span class="at">attribute =</span> <span class="st">'treeID'</span>)</span>
-<span id="cb4-3"><a href="#cb4-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Add treeID attribute to las</span></span>
-<span id="cb4-4"><a href="#cb4-4" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">=</span> <span class="fu">add_lasattribute</span>(tree_las, <span class="at">name =</span> <span class="st">"treeID"</span>, <span class="at">desc =</span> <span class="st">"ID of a tree"</span>)</span>
-<span id="cb4-5"><a href="#cb4-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter out non tree points to speed up computation</span></span>
-<span id="cb4-6"><a href="#cb4-6" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">&lt;-</span> <span class="fu">filter_poi</span>(tree_las, <span class="sc">!</span><span class="fu">is.na</span>(treeID))</span>
-<span id="cb4-7"><a href="#cb4-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot resulting point cloud coloured by treeID</span></span>
-<span id="cb4-8"><a href="#cb4-8" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(tree_las, <span class="at">color =</span> <span class="st">'treeID'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb7"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Merge Crown ID with las point cloud</span></span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">&lt;-</span> lidR<span class="sc">::</span><span class="fu">merge_spatial</span>(las, crowns, <span class="at">attribute =</span> <span class="st">'treeID'</span>)</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Add treeID attribute to las</span></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">=</span> <span class="fu">add_lasattribute</span>(tree_las, <span class="at">name =</span> <span class="st">"treeID"</span>, <span class="at">desc =</span> <span class="st">"ID of a tree"</span>)</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter out non tree points to speed up computation</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>tree_las <span class="ot">&lt;-</span> <span class="fu">filter_poi</span>(tree_las, <span class="sc">!</span><span class="fu">is.na</span>(treeID))</span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot resulting point cloud coloured by treeID</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(tree_las, <span class="at">color =</span> <span class="st">'treeID'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="quarto-figure quarto-figure-center">
 <figure class="figure">
@@ -225,34 +400,34 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 </div>
 <p>Generate 3D alphashape and calculate convex/concave hull (crown) volume for each tree</p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb5"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter out points for one tree (example)</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true" tabindex="-1"></a>tree <span class="ot">&lt;-</span> <span class="fu">filter_poi</span>(tree_las, treeID <span class="sc">==</span> <span class="dv">147</span>)</span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Calculate alphashape for tree</span></span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true" tabindex="-1"></a>ashape <span class="ot">&lt;-</span> <span class="fu">get_crown_attributes</span>(tree<span class="sc">@</span>data<span class="sc">$</span>X,</span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true" tabindex="-1"></a>                     tree<span class="sc">@</span>data<span class="sc">$</span>Y,</span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true" tabindex="-1"></a>                     tree<span class="sc">@</span>data<span class="sc">$</span>Z,</span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true" tabindex="-1"></a>                     <span class="at">export_ashape =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Extract individual X,Y,Z points (for plotting)</span></span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true" tabindex="-1"></a>a3d <span class="ot">&lt;-</span> ashape[[<span class="dv">3</span>]]</span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Extract alphashape object (for plotting)</span></span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true" tabindex="-1"></a>ashape <span class="ot">&lt;-</span> ashape[[<span class="dv">2</span>]]</span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot Raw Point Cloud</span></span>
-<span id="cb5-14"><a href="#cb5-14" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(tree, <span class="at">bg =</span> <span class="st">'white'</span>, <span class="at">size =</span> <span class="dv">6</span>)</span>
-<span id="cb5-15"><a href="#cb5-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot concave hull (alpha = 1)</span></span>
-<span id="cb5-16"><a href="#cb5-16" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(ashape, <span class="at">indexAlpha =</span> <span class="dv">1</span>, <span class="at">transparency =</span> <span class="fl">0.3</span>, <span class="at">axes =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb5-17"><a href="#cb5-17" aria-hidden="true" tabindex="-1"></a><span class="fu">points3d</span>(a3d, <span class="at">color =</span> <span class="st">'black'</span>)</span>
-<span id="cb5-18"><a href="#cb5-18" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot convex hull (alpha = Inf)</span></span>
-<span id="cb5-19"><a href="#cb5-19" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(ashape, <span class="at">indexAlpha =</span> <span class="dv">2</span>, <span class="at">transparency =</span> <span class="fl">0.4</span>, <span class="at">axes =</span> <span class="cn">TRUE</span>)</span>
-<span id="cb5-20"><a href="#cb5-20" aria-hidden="true" tabindex="-1"></a><span class="fu">points3d</span>(a3d, <span class="at">color =</span> <span class="st">'black'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb8"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Filter out points for one tree (example)</span></span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a>tree <span class="ot">&lt;-</span> <span class="fu">filter_poi</span>(tree_las, treeID <span class="sc">==</span> <span class="dv">147</span>)</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a><span class="co"># Calculate alphashape for tree</span></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a>ashape <span class="ot">&lt;-</span> <span class="fu">get_crown_attributes</span>(tree<span class="sc">@</span>data<span class="sc">$</span>X,</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>                     tree<span class="sc">@</span>data<span class="sc">$</span>Y,</span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>                     tree<span class="sc">@</span>data<span class="sc">$</span>Z,</span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>                     <span class="at">export_ashape =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Extract individual X,Y,Z points (for plotting)</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a>a3d <span class="ot">&lt;-</span> ashape[[<span class="dv">3</span>]]</span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a><span class="co"># Extract alphashape object (for plotting)</span></span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>ashape <span class="ot">&lt;-</span> ashape[[<span class="dv">2</span>]]</span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot Raw Point Cloud</span></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(tree, <span class="at">bg =</span> <span class="st">'white'</span>, <span class="at">size =</span> <span class="dv">6</span>)</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot concave hull (alpha = 1)</span></span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(ashape, <span class="at">indexAlpha =</span> <span class="dv">1</span>, <span class="at">transparency =</span> <span class="fl">0.3</span>, <span class="at">axes =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a><span class="fu">points3d</span>(a3d, <span class="at">color =</span> <span class="st">'black'</span>)</span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot convex hull (alpha = Inf)</span></span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(ashape, <span class="at">indexAlpha =</span> <span class="dv">2</span>, <span class="at">transparency =</span> <span class="fl">0.4</span>, <span class="at">axes =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a><span class="fu">points3d</span>(a3d, <span class="at">color =</span> <span class="st">'black'</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <p><img src="images/alphashape_visualization.png" class="img-fluid"></p>
 <div class="cell">
-<div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Decimate density heavily to speed up alphashape computation in example</span></span>
-<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>tree_las_dec <span class="ot">&lt;-</span> <span class="fu">decimate_points</span>(tree_las, <span class="fu">random_per_voxel</span>(<span class="at">res =</span> <span class="fl">0.5</span>, <span class="at">n =</span> <span class="dv">1</span>))</span>
-<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>ashape_mets <span class="ot">&lt;-</span> <span class="fu">get_alphashape_metrics</span>(tree_las)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Decimate density heavily to speed up alphashape computation in example</span></span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a>tree_las_dec <span class="ot">&lt;-</span> <span class="fu">decimate_points</span>(tree_las, <span class="fu">random_per_voxel</span>(<span class="at">res =</span> <span class="fl">0.5</span>, <span class="at">n =</span> <span class="dv">1</span>))</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a>ashape_mets <span class="ot">&lt;-</span> <span class="fu">get_alphashape_metrics</span>(tree_las)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>[1] "Individual LAS object input into function"
 Beginning crown metric generation for chunk</code></pre>
@@ -265,7 +440,17 @@ Beginning crown metric generation for chunk</code></pre>
 <p></p><figcaption class="figure-caption">Calculation of Heygi style competition index (maxR = sphere of influence radius)</figcaption><p></p>
 </figure>
 </div>
-<p>This function will be used to take the detected tree tops from lidR (an sf point obect), convert them to a <a href="https://spatstat.org/">spatstat</a> compatiable point pattern (ppp) object, and finally performing the pairwise competition index using the <a href="https://github.com/ogarciav/siplab">siplap</a> package to compute the index.</p>
+</section>
+<section id="functions-2" class="level3">
+<h3 class="anchored" data-anchor-id="functions-2">Functions</h3>
+<div class="panel-tabset">
+<ul class="nav nav-tabs" role="tablist"><li class="nav-item" role="presentation"><a class="nav-link active" id="tabset-3-1-tab" data-bs-toggle="tab" data-bs-target="#tabset-3-1" role="tab" aria-controls="tabset-3-1" aria-selected="true" href="">Competition Index</a></li></ul>
+<div class="tab-content">
+<div id="tabset-3-1" class="tab-pane active" role="tabpanel" aria-labelledby="tabset-3-1-tab">
+<p>Calculate Heygi 1974 Pairwise Index with sf point objects (tree tops) This function will be used to take the detected tree tops from lidR (an sf point obect), convert them to a <a href="https://spatstat.org/">spatstat</a> compatiable point pattern (ppp) object, and finally performing the pairwise competition index using the <a href="https://github.com/ogarciav/siplab">siplap</a> package to compute the index.</p>
+</div>
+</div>
+</div>
 <p>Here we will take the function and apply it to the tree tops attributed with concave_hull volume from their associated point cloud. We will finish by plotting the result (filtered/binned to emphasize differences in index values).</p>
 <div class="cell">
 <div class="cell-output cell-output-stdout">
@@ -273,9 +458,10 @@ Beginning crown metric generation for chunk</code></pre>
 1.06 sec elapsed</code></pre>
 </div>
 <div class="cell-output-display">
-<p><img src="index_files/figure-html/unnamed-chunk-12-1.png" class="img-fluid" width="672"></p>
+<p><img src="index_files/figure-html/unnamed-chunk-16-1.png" class="img-fluid" width="672"></p>
 </div>
 </div>
+</section>
 </section>
 
 </main>
