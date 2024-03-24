@@ -43,7 +43,7 @@ las <- readLAS('extdata/thin_plot_dec.laz')
 
 First we will generate a canopy height model, smooth it, then detect tree tops, and finally segment tree crowns
 
-Canopy Height Model Generation
+### Canopy Height Model Generation
 
 ```{r}
 # Generate Canopy Height Model (CHM) with lidR
@@ -67,7 +67,7 @@ chm <- terra::focal(chm, w = fgauss(1, n = 5), na.rm = T)
 plot(chm, col = viridis::viridis(50))
 ```
 
-Tree top detection
+### Tree top detection
 
 ```{r}
 # Locate tree tops on smoothed CHM with 2m maxima finding window
@@ -78,12 +78,14 @@ plot(chm, col = viridis::viridis(50))
 plot(st_geometry(ttops), add = T, pch = 3, col = 'red', cex = 0.5)
 ```
 
-Tree crown segmentation
+## Tree crown segmentation
 
 ### Functions
 
 ::: panel-tabset
-## Maker controlled watershed segmentation (requires EBimage)
+## Watershed Function
+
+Maker controlled watershed segmentation (requires EBimage)
 
 ```{r}
 # Base watershed segmentation (requires EBimage)
@@ -123,8 +125,10 @@ mcwatershed <-function(chm, treetops, th_tree = 2, tree_id = "treeID")
 }
 ```
 
-## Tree Segmentation
-Modified Height Limited approach
+## Modified Watershed Segmentation
+
+**Modified Height Limited approach**
+
 This approach attempts to limit watershed crown segmentations using a canopy height pixel threshold parameter that is multiplied by the tree height; in this sense a 10 m tall tree could not contain pixels less than 7 m in height. This approach is useful in dense closed canopy stands to reduce oversegmentation.
 
 ```{r}
@@ -179,7 +183,9 @@ crown_mask <- function(chunk, ttops = NULL, chm_res = 0.25, crown_height_thresho
 ```
 
 ## Clean Segmentations
-Fill Segmentations and keep largest crown polygon
+
+**Fill Segmentations and keep largest crown polygon.**
+
 This function is used to clean up the holes in segmentations resulting from the height limited approach, and to take the resulting largest polygon that is assumed to be the tree crown.
 
 ```{r}
@@ -261,14 +267,33 @@ plot(sf::st_geometry(crowns), add = T, border = 'red',lty = 2)
 
 ```
 
-Apply treeID values from segmented tree crowns to point cloud
+## **Apply treeID values from segmented tree crowns to point cloud**
+
+```{r}
+# Merge Crown ID with las point cloud
+tree_las <- lidR::merge_spatial(las, crowns, attribute = 'treeID')
+# Add treeID attribute to las
+tree_las = add_lasattribute(tree_las, name = "treeID", desc = "ID of a tree")
+# Filter out non tree points to speed up computation
+tree_las <- filter_poi(tree_las, !is.na(treeID))
+# Plot resulting point cloud coloured by treeID
+plot(tree_las, color = 'treeID')
+```
+
+```{r, include=F}
+rgl::close3d(silent = T)
+```
+
+![DLS point cloud plot coloured by treeID's generated in detection/segmentation process](images/ex_plot_treeid.png)
+
+## Generate 3D alphashape and calculate convex/concave hull (crown) volume for each tree
 
 ### Functions
 
 ::: panel-tabset
 ## Computing Crown Volume
 
-Compute alphashape of a clipped lidar point cloud
+**Compute alphashape of a clipped lidar point cloud**
 
 This function takes an input individual tree lidar point cloud and computes and alpha shape using the [alphashape3d](https://cran.r-project.org/web/packages/alphashape3d/index.html) package. To do so first any segmentation with less than 3 points are discarded (in practice there are few or none). Second the X, Y, and Z coordinates are normalized to be locally referenced. Next several metrics including the volume of the hull are calculated.
 
@@ -316,7 +341,9 @@ get_crown_attributes <- function(X,Y,Z){
 ```
 
 ## Apply Across Dataset
-The following is a lidR compatible function to compute these metrics across large areas.
+
+### The following is a lidR compatible function to compute these metrics across large areas.
+
 To apply this across large lidar tiles where treeIDs have been attributed to each relevant point we create this wrapper function that applies the above function across each tree ID.
 
 ```{r, include=FALSE}
@@ -364,25 +391,6 @@ return(mets)
 ```
 :::
 
-```{r}
-# Merge Crown ID with las point cloud
-tree_las <- lidR::merge_spatial(las, crowns, attribute = 'treeID')
-# Add treeID attribute to las
-tree_las = add_lasattribute(tree_las, name = "treeID", desc = "ID of a tree")
-# Filter out non tree points to speed up computation
-tree_las <- filter_poi(tree_las, !is.na(treeID))
-# Plot resulting point cloud coloured by treeID
-plot(tree_las, color = 'treeID')
-```
-
-```{r, include=F}
-rgl::close3d(silent = T)
-```
-
-![DLS point cloud plot coloured by treeID's generated in detection/segmentation process](images/ex_plot_treeid.png)
-
-Generate 3D alphashape and calculate convex/concave hull (crown) volume for each tree
-
 ```{r, eval=FALSE}
 # Filter out points for one tree (example)
 tree <- filter_poi(tree_las, treeID == 147)
@@ -407,7 +415,7 @@ points3d(a3d, color = 'black')
 
 ```
 
-![](images/alphashape_visualization.png)
+![Example computation of three-dimensional alpha shapes from segmented a tree point cloud. Clipped point cloud is displayed on the left, convex (alpha = Infinite) and concave (alpha = 1) alpha shapes fit to this point cloud are displayed in the centre and right](images/alphashape_visualization.png)
 
 ```{r, eval = TRUE,message=FALSE, warning=FALSE}
 # Decimate density heavily to speed up alphashape computation in example
@@ -425,12 +433,12 @@ Calculate Competition Index based on Crown Volume Values
 
 ![Calculation of Heygi style competition index (maxR = sphere of influence radius)](images/heygi.png)
 
-### Functions 
+### Functions
 
 ::: panel-tabset
-## Competition Index 
-Calculate Heygi 1974 Pairwise Index with sf point objects (tree tops)
-This function will be used to take the detected tree tops from lidR (an sf point obect), convert them to a [spatstat](https://spatstat.org/) compatiable point pattern (ppp) object, and finally performing the pairwise competition index using the [siplap](https://github.com/ogarciav/siplab) package to compute the index.
+## Competition Index
+
+Calculate Heygi 1974 Pairwise Index with sf point objects (tree tops) This function will be used to take the detected tree tops from lidR (an sf point obect), convert them to a [spatstat](https://spatstat.org/) compatiable point pattern (ppp) object, and finally performing the pairwise competition index using the [siplap](https://github.com/ogarciav/siplab) package to compute the index.
 
 ```{r, include=FALSE}
 heygi_cindex <- function(ttops, comp_input = 'vol_convex', maxR = 6){
