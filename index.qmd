@@ -6,23 +6,14 @@ format:
    toc: true
    toc-depth: 2
    toc-location: left
-   other-links:
-     - text: Read Irwin et al. 2024
-       url: https://google.com
-     - text: lidR book
-       url: https://r-lidar.github.io/lidRbook/
-     - text: alphashape3d
-       url: https://cran.r-project.org/web/packages/alphashape3d/index.html
-     - text: siplab
-       url: https://cran.r-project.org/web/packages/siplab/index.html
 editor: visual
 ---
 
-# Quantifying Tree-level Competition Metrics and Crown Volume with Lidar Data - Irwin et al. 2024
+# Quantifying Tree-level Competition Metrics and Crown Volume with Drone Lidar Data - Irwin et al. 2024
 
 ## Overview
 
-In this document we will provide a brief overview of the processing steps required to go from a raw point cloud to a individual tree competition metric layer. This workflow is based on the methods outlined in Irwin et al. 2024 and is designed to be used with the R programming language.
+In this document we will provide a brief overview of the processing steps required to go from a raw point cloud to a individual tree competition metric layer. This workflow is based on the methods outlined in [Irwin et al. 2024](http://doi.org/10.1093/forestry/cpae030) and is designed to be used with the R programming language.
 
 1 - Normalized LAS point cloud
 
@@ -36,13 +27,15 @@ In this document we will provide a brief overview of the processing steps requir
 
 ## Tree Detection and Segmentation
 
-In this snippet we will start with a normalized lidar point cloud collected over a coniferous managed forest stand. In this stand managers have expressed desire to perform thinning but require a spatially explicit layer describing the competitive distribution of trees to prioritize their approach. Using this layer they can target areas or even trees with relatively high competition estimates for thinning.
+In this snippet we will start with a normalized lidar point cloud collected over a coniferous managed forest stand. In this stand managers have expressed desire to perform thinning but require a spatially explicit layer describing the competitive distribution of trees to prioritize their approach. Using this layer they can target areas or even trees with relatively high competition metrics as priority for thinning.
 
-First we will detect and segment tree crowns [(more details: lidRbook/itd-its)](https://r-lidar.github.io/lidRbook/itd-its.html)
+First we will detect and segment tree crowns, there are many methods to achieve this and they should be selected based on the objectives, forest type, and avaliable compute power [(more details: lidRbook/itd-its)](https://r-lidar.github.io/lidRbook/itd-its.html). In this study we applied a modified marker-based watershed approach. Thanks to the distinct conical shape and distribution of the trees in these conifer dominated stands, this approach worked well for detecting and segmenting dominant and co-dominant trees that are the target for commercial thinning.
 
-We will start by loading relevant packages and an example L1 lidar dataset; a subset of the drone laser scanning data clipped from the Irwin et al. 2024 data
+We will start by loading relevant packages and an example point cloud from the [DJI L1](https://enterprise.dji.com/zenmuse-l1) lidar dataset; a subset of the drone laser scanning data clipped from the [Irwin et al. 2024](http://doi.org/10.1093/forestry/cpae030) coverage. See the manuscript for details on acquisition parameters.
 
--   To speed up computation in this example the point cloud has been thinned from the original density (\~1200 pts/m2) using a 25 cm voxel retaining 1 random point for each, resulting in a final point density of (173 points/m2).
+-   To speed up computation in this tutorial, the point cloud has been thinned from the original density (\~1200 pts/m2) using a 25 cm voxel retaining 1 random point for each, resulting in a final point density of (173 points/m2).
+
+Download the point cloud [here (8.05 mb)](extdata/thin_plot_dec.laz)
 
 ```{r, message=FALSE, warning=FALSE}
 library(lidR) # For processing lidar data
@@ -56,7 +49,7 @@ las <- readLAS('extdata/thin_plot_dec.laz')
 
 ![Example data included in tutorial: top row is unthinned DLS dataset (1250 points/m2, coloured by Z values and RGB), bottom row is same dataset thinned to one point per 0.25 m voxel (173 points/m2)](images/ex_plot.png)
 
-First we will generate a canopy height model, smooth it, then detect tree tops, and finally segment tree crowns
+First we will generate a canopy height model, smooth it, detect tree tops, and finally segment tree crowns.
 
 ### Canopy Height Model Generation
 
@@ -144,7 +137,7 @@ mcwatershed <-function(chm, treetops, th_tree = 2, tree_id = "treeID")
 
 **Modified Height Limited approach**
 
-This approach limits watershed crown segmentations using a canopy height pixel threshold parameter that is set as a multiple of tree height. In this sense a 10 m tall tree crown could not contain CHM pixels less than 7 m in height. This approach is very useful in dense closed canopy stands to reduce oversegmentation and constraint watershed results.
+This approach limits watershed crown segmentation using a canopy height pixel threshold parameter that is set as a multiple of tree height. In this sense a 10 m tall tree crown could not contain CHM pixels less than 7 m in height. This approach is very useful in dense closed canopy stands to reduce over-segmentation and constraint watershed results.
 
 ```{r}
 # Height limited watershed segmentation function 
@@ -198,7 +191,7 @@ crown_mask <- function(chunk, ttops = NULL, chm_res = 0.25, crown_height_thresho
 
 ## Clean Segmentations
 
-**Fill watershed segmentations and keep largest crown polygon for each tree**
+Fill watershed segmentations and keep largest crown polygon for each tree
 
 This function is used to clean up the holes in segmentations resulting from the height limited approach, and to take the resulting largest polygon that is assumed to be the tree crown.
 
@@ -283,7 +276,7 @@ plot(sf::st_geometry(crowns), add = T, border = 'red',lty = 2)
 
 ## Calculate Tree Crown Volume
 
-### **Apply treeID values from segmented tree crowns to point cloud**
+### Apply treeID values from segmented tree crowns to point cloud
 
 ```{r}
 # Merge Crown ID with las point cloud
@@ -443,7 +436,7 @@ ashape_mets <- get_alphashape_metrics(tree_las)
 
 ## Compute Competition Index
 
-### **Calculate Competition Index based on Crown Volume Values**
+### Calculate Competition Index based on Crown Volume Values
 
 ![Calculation of Heygi style competition index (maxR = radius of sphere of influence)](images/heygi.png)
 
@@ -453,8 +446,6 @@ ashape_mets <- get_alphashape_metrics(tree_las)
 ## Competition Index
 
 Calculate Heygi 1974 Pairwise Index with sf point objects (tree tops) This function will be used to take the detected tree tops from lidR (an sf point obect), convert them to a [spatstat](https://spatstat.org/) compatiable point pattern (ppp) object, and finally calculate the pairwise competition index using the [siplap](https://github.com/ogarciav/siplab) package. Read the paper on siplap [here](https://www.proquest.com/scholarly-journals/generic-approach-spatial-individual-based/docview/1565497138/se-2).
-
-
 
 ```{r}
 heygi_cindex <- function(ttops, comp_input = 'vol_convex', maxR = 6){
