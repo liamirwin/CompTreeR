@@ -610,10 +610,33 @@ Beginning crown metric generation for chunk</code></pre>
 </div>
 <p>Here we will take the above function and apply it to the tree tops attributed with the convex hull alpha shape volume from their associated point clouds. We will finish by plotting the result (filtered/binned to emphasize differences in index values).</p>
 <div class="cell">
+<div class="sourceCode cell-code" id="cb14"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Calculate Heygi 1974 style Competition Index on tree tops attributed with crown volume values - remove one outliers one edge</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a>heygi_6m <span class="ot">&lt;-</span> <span class="fu">heygi_cindex</span>(ashape_mets, <span class="at">comp_input =</span> <span class="st">'vol_concave'</span>, <span class="at">maxR =</span> <span class="dv">6</span>) <span class="sc">%&gt;%</span> <span class="fu">filter</span>(cindex <span class="sc">&lt;</span> <span class="dv">10</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Calculated Heygi style competition for 335 trees assesing their vol_concave within a 6m radius
-1.11 sec elapsed</code></pre>
+1.21 sec elapsed</code></pre>
 </div>
+<div class="sourceCode cell-code" id="cb16"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb16-1"><a href="#cb16-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Define the bins</span></span>
+<span id="cb16-2"><a href="#cb16-2" aria-hidden="true" tabindex="-1"></a>breaks <span class="ot">&lt;-</span> <span class="fu">seq</span>(<span class="dv">0</span>, <span class="dv">10</span>, <span class="at">by =</span> <span class="fl">2.5</span>)</span>
+<span id="cb16-3"><a href="#cb16-3" aria-hidden="true" tabindex="-1"></a>bin_labels <span class="ot">&lt;-</span> <span class="fu">paste</span>(<span class="fu">head</span>(breaks, <span class="sc">-</span><span class="dv">1</span>), <span class="fu">tail</span>(breaks, <span class="sc">-</span><span class="dv">1</span>), <span class="at">sep =</span> <span class="st">"-"</span>)</span>
+<span id="cb16-4"><a href="#cb16-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-5"><a href="#cb16-5" aria-hidden="true" tabindex="-1"></a><span class="co"># Assign each cindex value to a bin</span></span>
+<span id="cb16-6"><a href="#cb16-6" aria-hidden="true" tabindex="-1"></a>heygi_6m<span class="sc">$</span>cindex_bin <span class="ot">&lt;-</span> <span class="fu">cut</span>(heygi_6m<span class="sc">$</span>cindex, <span class="at">breaks =</span> breaks, <span class="at">labels =</span> bin_labels, <span class="at">include.lowest =</span> <span class="cn">TRUE</span>)</span>
+<span id="cb16-7"><a href="#cb16-7" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-8"><a href="#cb16-8" aria-hidden="true" tabindex="-1"></a><span class="co"># Create a color mapping for the bins - ensuring one color per bin</span></span>
+<span id="cb16-9"><a href="#cb16-9" aria-hidden="true" tabindex="-1"></a>c <span class="ot">&lt;-</span> viridis<span class="sc">::</span><span class="fu">viridis</span>(<span class="fu">length</span>(bin_labels))</span>
+<span id="cb16-10"><a href="#cb16-10" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-11"><a href="#cb16-11" aria-hidden="true" tabindex="-1"></a><span class="co"># Map each bin to its color</span></span>
+<span id="cb16-12"><a href="#cb16-12" aria-hidden="true" tabindex="-1"></a>bin_colors <span class="ot">&lt;-</span> <span class="fu">setNames</span>(c, bin_labels)</span>
+<span id="cb16-13"><a href="#cb16-13" aria-hidden="true" tabindex="-1"></a>cindex_bin_colors <span class="ot">&lt;-</span> bin_colors[<span class="fu">as.character</span>(heygi_6m<span class="sc">$</span>cindex_bin)]</span>
+<span id="cb16-14"><a href="#cb16-14" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot the CHM</span></span>
+<span id="cb16-15"><a href="#cb16-15" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(chm, <span class="at">col =</span> <span class="fu">colorRampPalette</span>(<span class="fu">c</span>(<span class="st">"black"</span>, <span class="st">"white"</span>))(<span class="dv">50</span>), <span class="at">legend =</span> T)</span>
+<span id="cb16-16"><a href="#cb16-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-17"><a href="#cb16-17" aria-hidden="true" tabindex="-1"></a><span class="co"># Plot the sf points with bin colors</span></span>
+<span id="cb16-18"><a href="#cb16-18" aria-hidden="true" tabindex="-1"></a><span class="fu">plot</span>(<span class="fu">st_geometry</span>(heygi_6m), <span class="at">add =</span> <span class="cn">TRUE</span>, <span class="at">pch =</span> <span class="dv">21</span>, <span class="at">bg =</span> cindex_bin_colors, <span class="at">col =</span> <span class="cn">NA</span>)</span>
+<span id="cb16-19"><a href="#cb16-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb16-20"><a href="#cb16-20" aria-hidden="true" tabindex="-1"></a><span class="co"># Add a legend for the bins</span></span>
+<span id="cb16-21"><a href="#cb16-21" aria-hidden="true" tabindex="-1"></a><span class="fu">legend</span>(<span class="st">"bottomleft"</span>, <span class="at">legend =</span> bin_labels, <span class="at">fill =</span> bin_colors, <span class="at">title =</span> <span class="st">"Competition Index"</span>, <span class="at">inset =</span> (<span class="fu">c</span>(<span class="fl">0.13</span>,<span class="dv">0</span>)))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 <div class="cell-output-display">
 <div>
 <figure class="figure">

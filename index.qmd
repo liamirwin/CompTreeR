@@ -493,7 +493,7 @@ heygi_cindex <- function(ttops, comp_input = 'vol_convex', maxR = 6){
 
 Here we will take the above function and apply it to the tree tops attributed with the convex hull alpha shape volume from their associated point clouds. We will finish by plotting the result (filtered/binned to emphasize differences in index values).
 
-```{r, warning=FALSE, message=FALSE, echo=FALSE}
+```{r, warning=FALSE, message=FALSE, echo=TRUE}
 # Calculate Heygi 1974 style Competition Index on tree tops attributed with crown volume values - remove one outliers one edge
 heygi_6m <- heygi_cindex(ashape_mets, comp_input = 'vol_concave', maxR = 6) %>% filter(cindex < 10)
 
